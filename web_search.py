@@ -20,13 +20,14 @@ QUALITY_DOMAINS = [
     'wikipedia.org', 'britannica.com', 'nationalgeographic.com', 'nature.com', 
     'sciencedirect.com', 'smithsonianmag.com', 'scientificamerican.com',
     'bbc.com', 'reuters.com', 'ap.org', 'cnn.com', 'npr.org',
-    'edu', 'gov', 'org'
+    'tripadvisor.com', 'lonelyplanet.com', 'booking.com', 'expedia.com',
+    'airbnb.com', 'hotels.com', 'agoda.com', 'makemytrip.com',
+    'edu', 'gov', 'org', 'com'
 ]
 
 # Low quality domains to avoid
 BAD_DOMAINS = [
-    'pinterest.com', 'quora.com', 'reddit.com', 'yahoo.answers',
-    'wiki.answers.com', 'ehow.com', 'answers.com', 'ask.com',
+    'pinterest.com', 'yahoo.answers', 'wiki.answers.com', 
     'chacha.com', 'blurtit.com', 'weegy.com'
 ]
 
@@ -131,29 +132,57 @@ def search_google_scrape(query: str, max_results: int = 10) -> List[str]:
         }
         
         url = "https://www.google.com/search"
+        print(f"🌐 Requesting Google: {url}")
         response = requests.get(url, params=params, headers=headers, timeout=15)
+        print(f"📡 Google response status: {response.status_code}")
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Find search result links
+            # Find search result links with multiple selectors
             links = []
-            for g in soup.find_all('div', class_='g'):
-                link = g.find('a')
-                if link and link.get('href'):
-                    href = link['href']
-                    if href.startswith('/url?q='):
-                        # Extract actual URL from Google redirect
-                        actual_url = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get('q')
-                        if actual_url:
-                            links.append(actual_url[0])
-                    elif href.startswith('http'):
-                        links.append(href)
-                        
-                if len(links) >= max_results:
+            
+            # Try multiple Google result selectors
+            selectors = [
+                'div.g a',  # Standard results
+                'div[data-ved] a',  # Alternative results
+                'h3 a',  # Header links
+                'a[href^="/url?q="]',  # URL-encoded links
+                'a[href^="http"]'  # Direct HTTP links
+            ]
+            
+            for selector in selectors:
+                elements = soup.select(selector)
+                print(f"🔍 Found {len(elements)} elements with selector: {selector}")
+                
+                for element in elements:
+                    href = element.get('href')
+                    if href:
+                        if href.startswith('/url?q='):
+                            # Extract actual URL from Google redirect
+                            try:
+                                actual_url = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get('q')
+                                if actual_url:
+                                    clean_url = actual_url[0]
+                                    if clean_url.startswith('http') and clean_url not in links:
+                                        links.append(clean_url)
+                            except:
+                                continue
+                        elif href.startswith('http') and href not in links:
+                            links.append(href)
+                            
+                    if len(links) >= max_results:
+                        break
+                
+                if links:  # If we found links with this selector, use them
                     break
                     
-            print(f"✅ Google scrape found {len(links)} results")
+            print(f"✅ Google scrape found {len(links)} raw results")
+            
+            # Debug: Print first few URLs
+            for i, link in enumerate(links[:3]):
+                print(f"  {i+1}. {link}")
+            
             return filter_quality_urls(links)
         else:
             print(f"⚠️ Google search failed with status {response.status_code}")
@@ -213,21 +242,55 @@ def search_duckduckgo_lite(query: str, max_results: int = 10) -> List[str]:
         }
         
         url = "https://html.duckduckgo.com/html/"
+        print(f"🌐 Requesting DuckDuckGo: {url}")
         response = requests.get(url, params=params, headers=headers, timeout=15)
+        print(f"📡 DuckDuckGo response status: {response.status_code}")
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             
             links = []
-            for result in soup.find_all('a', class_='result__url'):
-                href = result.get('href')
-                if href and href.startswith('http'):
-                    links.append(href)
-                    
-                if len(links) >= max_results:
+            
+            # Try multiple DuckDuckGo selectors
+            selectors = [
+                'a.result__url',  # Standard results
+                'a[class*="result"]',  # Alternative result links
+                '.result h2 a',  # Header links in results
+                '.results a[href^="http"]'  # Direct HTTP links in results
+            ]
+            
+            for selector in selectors:
+                elements = soup.select(selector)
+                print(f"🔍 Found {len(elements)} elements with selector: {selector}")
+                
+                for element in elements:
+                    href = element.get('href')
+                    if href and href.startswith('http') and href not in links:
+                        links.append(href)
+                        
+                    if len(links) >= max_results:
+                        break
+                
+                if links:  # If we found links with this selector, use them
                     break
-                    
-            print(f"✅ DuckDuckGo HTML found {len(links)} results")
+            
+            # If no links found, try a more general approach
+            if not links:
+                print("🔍 Trying general link extraction...")
+                all_links = soup.find_all('a', href=True)
+                for link in all_links:
+                    href = link['href']
+                    if href.startswith('http') and 'duckduckgo.com' not in href:
+                        links.append(href)
+                        if len(links) >= max_results:
+                            break
+                            
+            print(f"✅ DuckDuckGo HTML found {len(links)} raw results")
+            
+            # Debug: Print first few URLs
+            for i, link in enumerate(links[:3]):
+                print(f"  {i+1}. {link}")
+            
             return filter_quality_urls(links)
         else:
             print(f"⚠️ DuckDuckGo HTML failed with status {response.status_code}")

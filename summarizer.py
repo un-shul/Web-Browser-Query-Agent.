@@ -86,7 +86,7 @@ def remove_duplicate_sentences(sentences):
     Remove duplicate and very similar sentences
     """
     unique_sentences = []
-    seen_content = set()
+    seen_content = []
     
     for sentence in sentences:
         # Create a normalized version for comparison
@@ -95,15 +95,15 @@ def remove_duplicate_sentences(sentences):
         
         # Skip if we've seen very similar content
         is_duplicate = False
-        for seen in seen_content:
-            overlap = len(words.intersection(seen)) / max(len(words), len(seen))
+        for seen_words in seen_content:
+            overlap = len(words.intersection(seen_words)) / max(len(words), len(seen_words))
             if overlap > 0.7:  # 70% similarity threshold
                 is_duplicate = True
                 break
         
         if not is_duplicate:
             unique_sentences.append(sentence)
-            seen_content.add(words)
+            seen_content.append(words)
             
         # Limit to prevent overly long summaries
         if len(unique_sentences) >= 15:

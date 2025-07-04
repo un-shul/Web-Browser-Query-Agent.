@@ -3,8 +3,9 @@ import requests
 from bs4 import BeautifulSoup
 import time
 import random
+import urllib.parse
 import re
-from typing import List, Optional
+from typing import List, Dict
 
 # 🔒 GLOBAL REUSABLE CLIENT
 ddgs_client = DDGS()
@@ -12,6 +13,13 @@ ddgs_client = DDGS()
 # Rate limiting variables
 _last_search_time = 0
 _min_search_interval = 2.0  # Minimum seconds between searches
+
+# Simple user agents
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0",
+]
 
 # Content filtering patterns for better quality extraction
 AD_PATTERNS = [
@@ -42,49 +50,111 @@ UNWANTED_SELECTORS = [
     '.popup', '.modal', '.overlay', '.widget', '.related', '.recommended'
 ]
 
+def get_headers():
+    """Get simple headers"""
+    return {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+
+def search_duckduckgo_simple(query: str, max_results: int = 5) -> List[str]:
+    """
+    Simple DuckDuckGo search - just get results without filtering
+    """
+    try:
+        search_url = f"https://duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        print(f"🌐 Searching DuckDuckGo...")
+        
+        response = requests.get(search_url, headers=get_headers(), timeout=15)
+        
+        if response.status_code != 200:
+            return []
+            
+        soup = BeautifulSoup(response.text, 'html.parser')
+        results = soup.find_all('a', class_='result__url', href=True)
+        
+        urls = []
+        for link in results[:max_results]:
+            url = link['href']
+            # Extract actual URL from DuckDuckGo redirect
+            parsed_url = urllib.parse.urlparse(url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            
+            if 'uddg' in query_params:
+                actual_url = query_params['uddg'][0]
+                urls.append(actual_url)
+            elif url.startswith('http'):
+                urls.append(url)
+                
+        print(f"✅ Found {len(urls)} results")
+        return urls
+        
+    except Exception as e:
+        print(f"⚠️ DuckDuckGo error: {str(e)}")
+        return []
+
+def search_google_simple(query: str, max_results: int = 5) -> List[str]:
+    """
+    Simple Google search fallback
+    """
+    try:
+        params = {
+            'q': query,
+            'num': max_results,
+            'hl': 'en'
+        }
+        
+        url = "https://www.google.com/search"
+        print(f"🌐 Searching Google as fallback...")
+        
+        response = requests.get(url, params=params, headers=get_headers(), timeout=15)
+        
+        if response.status_code != 200:
+            return []
+            
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        urls = []
+        # Look for any links that start with http
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            if href.startswith('/url?q='):
+                # Extract from Google redirect
+                try:
+                    actual_url = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get('q', [None])[0]
+                    if actual_url and actual_url.startswith('http') and 'google.com' not in actual_url:
+                        urls.append(actual_url)
+                except:
+                    continue
+            elif href.startswith('http') and 'google.com' not in href:
+                urls.append(href)
+                
+            if len(urls) >= max_results:
+                break
+                
+        print(f"✅ Found {len(urls)} results")
+        return urls
+        
+    except Exception as e:
+        print(f"⚠️ Google error: {str(e)}")
+        return []
+
 def search_duckduckgo(query: str, max_results: int = 5, max_retries: int = 3) -> List[str]:
     """
-    Search DuckDuckGo and return URLs with proper rate limiting and retry logic
+    Main search function - compatible with main.py and app.py
     """
-    global _last_search_time
+    print(f"🔍 Searching for: {query}")
     
-    # Implement rate limiting - wait if needed
-    current_time = time.time()
-    time_since_last = current_time - _last_search_time
-    if time_since_last < _min_search_interval:
-        sleep_time = _min_search_interval - time_since_last
-        print(f"⏳ Rate limiting: waiting {sleep_time:.1f}s...")
-        time.sleep(sleep_time)
+    # Try DuckDuckGo first
+    urls = search_duckduckgo_simple(query, max_results)
     
-    for attempt in range(max_retries):
-        try:
-            _last_search_time = time.time()
-            results = ddgs_client.text(query, max_results=max_results)
-            return [result['href'] for result in results]
-            
-        except Exception as e:
-            error_str = str(e).lower()
-            
-            # Check if it's a rate limit error
-            if 'ratelimit' in error_str or '202' in error_str:
-                if attempt < max_retries - 1:
-                    # Exponential backoff with jitter
-                    wait_time = (2 ** attempt) + random.uniform(1, 3)
-                    print(f"⚠️ Rate limited. Waiting {wait_time:.1f}s before retry {attempt + 1}/{max_retries}...")
-                    time.sleep(wait_time)
-                    
-                    # Recreate client to reset any connection state
-                    global ddgs_client
-                    ddgs_client = DDGS()
-                    continue
-                else:
-                    print(f"⚠️ Max retries reached. Rate limit error: {str(e)}")
-                    return []
-            else:
-                print(f"⚠️ Search error: {str(e)}")
-                return []
+    # If DuckDuckGo fails, try Google
+    if not urls:
+        print("🔄 Trying Google...")
+        urls = search_google_simple(query, max_results)
     
-    return []
+    return urls
 
 def filter_content_quality(text: str) -> str:
     """
@@ -126,8 +196,8 @@ def extract_main_content(soup: BeautifulSoup) -> str:
     """
     Extract the main content from a webpage using multiple strategies
     """
-    # Remove unwanted elements
-    for element in soup(['script', 'style', 'noscript', 'iframe']):
+    # Remove unwanted elements - expanded list
+    for element in soup(['script', 'style', 'nav', 'footer', 'iframe', 'noscript']):
         element.decompose()
     
     # Remove elements by selector
@@ -179,59 +249,54 @@ def extract_main_content(soup: BeautifulSoup) -> str:
 
 def scrape_page(url: str, timeout: int = 10) -> str:
     """
-    Scrape content from a webpage with improved content filtering
+    Improved page scraping with better content filtering
     """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-
     try:
-        response = requests.get(url, headers=headers, timeout=timeout)
-        response.raise_for_status()
-
-        soup = BeautifulSoup(response.text, 'html.parser')
-        content = extract_main_content(soup)
+        response = requests.get(url, headers=get_headers(), timeout=timeout)
         
-        # Additional quality check - content should be substantial
-        if len(content) < 100:
-            print(f"⚠️ Content too short from {url}, skipping")
+        if response.status_code != 200:
             return ""
             
-        return content
-
-    except requests.exceptions.Timeout:
-        print(f"⚠️ Timeout scraping {url}")
-        return ""
-    except requests.exceptions.RequestException as e:
-        print(f"⚠️ Request error scraping {url}: {str(e)}")
-        return ""
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Use improved content extraction
+        text = extract_main_content(soup)
+        
+        # Additional quality check - content should be substantial
+        if len(text) < 100:
+            print(f"⚠️ Content too short from {url}, skipping")
+            return ""
+        
+        # Return first 5000 characters (same as your original)
+        return text[:5000] if text else ""
+        
     except Exception as e:
-        print(f"⚠️ Failed to scrape {url}: {str(e)}")
+        print(f"⚠️ Error scraping {url}: {str(e)}")
         return ""
 
-def search_and_scrape(query: str, max_results: int = 3, max_retries: int = 3) -> List[dict]:
+def search_and_scrape(query: str, max_results: int = 3, max_retries: int = 3) -> List[Dict[str, str]]:
     """
-    Combined function to search and scrape content from top results
+    Combined search and scrape - compatible with app.py
     """
-    print(f"🔍 Searching for: {query}")
-    urls = search_duckduckgo(query, max_results, max_retries)
+    urls = search_duckduckgo(query, max_results)
     
     if not urls:
-        print("❌ No search results found")
+        print("❌ No URLs found")
         return []
     
     results = []
     for i, url in enumerate(urls):
         print(f"📄 Scraping result {i+1}/{len(urls)}: {url}")
         content = scrape_page(url)
-        if content:
+        if content and len(content) > 100:  # Only keep substantial content
             results.append({
                 'url': url,
                 'content': content[:2000] + '...' if len(content) > 2000 else content
             })
         
-        # Add small delay between scraping requests
+        # Small delay between requests
         if i < len(urls) - 1:
             time.sleep(1)
     
+    print(f"✅ Successfully scraped {len(results)} pages")
     return results

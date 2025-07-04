@@ -57,7 +57,7 @@ def web_process_query(query):
     results_log.append("✂️ Summarizing scraped content...")
     
     try:
-        summary = summarize_text(combined)
+        summary = summarize_text(combined, query)
     except Exception as e:
         raise ValueError(f"❌ Summarization failed: {e}")
     

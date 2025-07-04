@@ -16,7 +16,7 @@ def search_duckduckgo(query: str, max_results: int = 5, max_retries: int = 3) ->
     """
     Search DuckDuckGo and return URLs with proper rate limiting and retry logic
     """
-    global _last_search_time
+    global _last_search_time, ddgs_client
     
     # Implement rate limiting - wait if needed
     current_time = time.time()
@@ -44,7 +44,6 @@ def search_duckduckgo(query: str, max_results: int = 5, max_retries: int = 3) ->
                     time.sleep(wait_time)
                     
                     # Recreate client to reset any connection state
-                    global ddgs_client
                     ddgs_client = DDGS()
                     continue
                 else:

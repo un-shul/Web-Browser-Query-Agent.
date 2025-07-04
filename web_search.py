@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import time
 import random
 import urllib.parse
+import re
 from typing import List, Dict, Optional
 
 # Rotating User Agents to avoid detection
@@ -13,6 +14,98 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ]
+
+# Quality domains - prioritize these sources
+QUALITY_DOMAINS = [
+    'wikipedia.org', 'britannica.com', 'nationalgeographic.com', 'nature.com', 
+    'sciencedirect.com', 'smithsonianmag.com', 'scientificamerican.com',
+    'bbc.com', 'reuters.com', 'ap.org', 'cnn.com', 'npr.org',
+    'edu', 'gov', 'org'
+]
+
+# Low quality domains to avoid
+BAD_DOMAINS = [
+    'pinterest.com', 'quora.com', 'reddit.com', 'yahoo.answers',
+    'wiki.answers.com', 'ehow.com', 'answers.com', 'ask.com',
+    'chacha.com', 'blurtit.com', 'weegy.com'
+]
+
+def enhance_query(query: str) -> str:
+    """
+    Enhance search queries for better results
+    """
+    query = query.lower().strip()
+    
+    # Query patterns and their enhancements
+    enhancements = {
+        # Animal queries
+        r'(biggest|largest|biggest) animal': 'largest animal in the world blue whale facts',
+        r'(smallest|tiniest) animal': 'smallest animal in the world facts',
+        r'what is.*animal': query + ' facts information',
+        
+        # Science queries  
+        r'how does.*work': query + ' explanation science',
+        r'what is.*made of': query + ' composition materials',
+        r'why is.*': query + ' explanation reason',
+        
+        # History queries
+        r'when did.*happen': query + ' historical facts',
+        r'who was.*': query + ' biography historical facts',
+        
+        # Geography queries
+        r'where is.*': query + ' location geography facts',
+        r'what is.*capital': query + ' geography',
+        
+        # General enhancement
+        r'.*': query + ' facts information'
+    }
+    
+    for pattern, enhancement in enhancements.items():
+        if re.match(pattern, query):
+            enhanced = enhancement
+            print(f"🔍 Enhanced query: '{query}' → '{enhanced}'")
+            return enhanced
+    
+    return query + ' facts information'
+
+def filter_quality_urls(urls: List[str]) -> List[str]:
+    """
+    Filter and sort URLs by quality
+    """
+    def get_domain_score(url: str) -> int:
+        """Score URLs based on domain quality"""
+        try:
+            domain = urllib.parse.urlparse(url).netloc.lower()
+            
+            # Check for quality domains
+            for quality_domain in QUALITY_DOMAINS:
+                if quality_domain in domain:
+                    return 100  # High priority
+            
+            # Check for bad domains
+            for bad_domain in BAD_DOMAINS:
+                if bad_domain in domain:
+                    return 0  # Skip these
+            
+            # Moderate quality for others
+            return 50
+            
+        except:
+            return 25
+
+    # Filter out bad domains and sort by quality
+    filtered_urls = []
+    for url in urls:
+        score = get_domain_score(url)
+        if score > 0:  # Skip score 0 (bad domains)
+            filtered_urls.append((url, score))
+    
+    # Sort by score (highest first) and return URLs
+    filtered_urls.sort(key=lambda x: x[1], reverse=True)
+    result = [url for url, score in filtered_urls]
+    
+    print(f"✅ Filtered {len(urls)} → {len(result)} quality URLs")
+    return result
 
 def get_random_headers():
     """Get randomized headers to avoid detection"""
@@ -25,7 +118,7 @@ def get_random_headers():
         "Upgrade-Insecure-Requests": "1",
     }
 
-def search_google_scrape(query: str, max_results: int = 5) -> List[str]:
+def search_google_scrape(query: str, max_results: int = 10) -> List[str]:
     """
     Scrape Google search results directly (backup method)
     """
@@ -61,7 +154,7 @@ def search_google_scrape(query: str, max_results: int = 5) -> List[str]:
                     break
                     
             print(f"✅ Google scrape found {len(links)} results")
-            return links
+            return filter_quality_urls(links)
         else:
             print(f"⚠️ Google search failed with status {response.status_code}")
             return []
@@ -70,7 +163,7 @@ def search_google_scrape(query: str, max_results: int = 5) -> List[str]:
         print(f"⚠️ Google scrape error: {str(e)}")
         return []
 
-def search_bing_scrape(query: str, max_results: int = 5) -> List[str]:
+def search_bing_scrape(query: str, max_results: int = 10) -> List[str]:
     """
     Scrape Bing search results directly
     """
@@ -99,7 +192,7 @@ def search_bing_scrape(query: str, max_results: int = 5) -> List[str]:
                     break
                     
             print(f"✅ Bing scrape found {len(links)} results")
-            return links
+            return filter_quality_urls(links)
         else:
             print(f"⚠️ Bing search failed with status {response.status_code}")
             return []
@@ -108,7 +201,7 @@ def search_bing_scrape(query: str, max_results: int = 5) -> List[str]:
         print(f"⚠️ Bing scrape error: {str(e)}")
         return []
 
-def search_duckduckgo_lite(query: str, max_results: int = 5) -> List[str]:
+def search_duckduckgo_lite(query: str, max_results: int = 10) -> List[str]:
     """
     Use DuckDuckGo HTML interface (more reliable than API)
     """
@@ -135,7 +228,7 @@ def search_duckduckgo_lite(query: str, max_results: int = 5) -> List[str]:
                     break
                     
             print(f"✅ DuckDuckGo HTML found {len(links)} results")
-            return links
+            return filter_quality_urls(links)
         else:
             print(f"⚠️ DuckDuckGo HTML failed with status {response.status_code}")
             return []
@@ -146,27 +239,30 @@ def search_duckduckgo_lite(query: str, max_results: int = 5) -> List[str]:
 
 def search_multi_engine(query: str, max_results: int = 5) -> List[str]:
     """
-    Try multiple search engines in sequence until one works
+    Try multiple search engines with enhanced queries
     """
-    print(f"🔍 Searching for: {query}")
+    enhanced_query = enhance_query(query)
+    print(f"🔍 Searching for: {enhanced_query}")
     
     # List of search methods to try in order
     search_methods = [
-        ("DuckDuckGo HTML", search_duckduckgo_lite),
-        ("Bing Scrape", search_bing_scrape),
         ("Google Scrape", search_google_scrape),
+        ("Bing Scrape", search_bing_scrape),
+        ("DuckDuckGo HTML", search_duckduckgo_lite),
     ]
     
     for method_name, search_func in search_methods:
         try:
             print(f"🔄 Trying {method_name}...")
-            results = search_func(query, max_results)
+            results = search_func(enhanced_query, max_results * 2)  # Get more results to filter
             
             if results:
-                print(f"✅ {method_name} successful! Found {len(results)} results")
-                return results
+                # Take top results after filtering
+                final_results = results[:max_results]
+                print(f"✅ {method_name} successful! Found {len(final_results)} quality results")
+                return final_results
             else:
-                print(f"❌ {method_name} returned no results")
+                print(f"❌ {method_name} returned no quality results")
                 
         except Exception as e:
             print(f"❌ {method_name} failed: {str(e)}")
@@ -177,9 +273,69 @@ def search_multi_engine(query: str, max_results: int = 5) -> List[str]:
     print("❌ All search methods failed")
     return []
 
-def scrape_page(url: str, timeout: int = 10) -> str:
+def extract_relevant_content(soup: BeautifulSoup, query: str) -> str:
     """
-    Scrape content from a webpage with improved error handling
+    Extract the most relevant content based on query context
+    """
+    # Remove unwanted elements
+    for element in soup(['script', 'style', 'nav', 'footer', 'iframe', 'noscript', 'header', 'aside']):
+        element.decompose()
+
+    # Try different content extraction strategies
+    content_selectors = [
+        'article',
+        'main', 
+        '[role="main"]',
+        '.content',
+        '.article-content',
+        '.post-content',
+        '.entry-content',
+        '#content',
+        '.main-content'
+    ]
+    
+    extracted_content = ""
+    
+    for selector in content_selectors:
+        content_elem = soup.select_one(selector)
+        if content_elem:
+            # Get paragraphs from this section
+            paragraphs = content_elem.find_all('p')
+            if len(paragraphs) >= 2:  # Ensure substantial content
+                extracted_content = content_elem.get_text(separator=' ', strip=True)
+                break
+    
+    # Fallback to body if no specific content area found
+    if not extracted_content:
+        body = soup.find('body')
+        if body:
+            extracted_content = body.get_text(separator=' ', strip=True)
+    
+    # Clean up the text
+    if extracted_content:
+        # Remove extra whitespace
+        extracted_content = ' '.join(extracted_content.split())
+        
+        # Try to find the most relevant paragraphs
+        sentences = extracted_content.split('.')
+        relevant_sentences = []
+        
+        query_words = set(query.lower().split())
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if len(sentence) > 20:  # Ignore very short sentences
+                sentence_words = set(sentence.lower().split())
+                # Check if sentence contains query-related words
+                if query_words.intersection(sentence_words) or len(relevant_sentences) < 3:
+                    relevant_sentences.append(sentence)
+                    
+        return '. '.join(relevant_sentences[:10])  # Take first 10 relevant sentences
+    
+    return ""
+
+def scrape_page(url: str, timeout: int = 15) -> str:
+    """
+    Scrape content from a webpage with improved content extraction
     """
     headers = get_random_headers()
 
@@ -188,22 +344,12 @@ def scrape_page(url: str, timeout: int = 10) -> str:
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
-
-        # Remove unwanted elements
-        for element in soup(['script', 'style', 'nav', 'footer', 'iframe', 'noscript', 'header']):
-            element.decompose()
-
-        # Extract main content - try multiple selectors
-        main_content = (
-            soup.find('article') or 
-            soup.find('main') or 
-            soup.find('div', class_=lambda x: x and any(keyword in x.lower() for keyword in ['content', 'article', 'post', 'body'])) or
-            soup.find('body')
-        )
         
-        if main_content:
-            text = main_content.get_text(separator='\n', strip=True)
-            return ' '.join(text.split())
+        # Extract relevant content
+        content = extract_relevant_content(soup, "")
+        
+        if content and len(content) > 100:  # Ensure we got substantial content
+            return content
         else:
             return ""
 
@@ -231,20 +377,22 @@ def search_and_scrape(query: str, max_results: int = 3) -> List[Dict[str, str]]:
     for i, url in enumerate(urls):
         print(f"📄 Scraping result {i+1}/{len(urls)}: {url}")
         content = scrape_page(url)
-        if content:
+        if content and len(content) > 50:  # Ensure quality content
             results.append({
                 'url': url,
-                'content': content[:2000] + '...' if len(content) > 2000 else content
+                'content': content[:3000] + '...' if len(content) > 3000 else content
             })
+        else:
+            print(f"⚠️ Skipped {url} - insufficient content")
         
         # Add delay between scraping requests
         if i < len(urls) - 1:
             time.sleep(random.uniform(2, 4))
     
-    print(f"✅ Successfully scraped {len(results)} pages")
+    print(f"✅ Successfully scraped {len(results)} quality pages")
     return results
 
 # Legacy function names for compatibility
 def search_duckduckgo(query: str, max_results: int = 5, max_retries: int = 3) -> List[str]:
-    """Legacy function - now uses multi-engine search"""
+    """Legacy function - now uses enhanced multi-engine search"""
     return search_multi_engine(query, max_results)

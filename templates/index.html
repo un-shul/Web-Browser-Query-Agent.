@@ -14,15 +14,17 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        .processing-log {
-            font-family: 'Courier New', monospace;
-            background: #1a1a1a;
-            color: #00ff00;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            max-height: 200px;
-            overflow-y: auto;
+        .progress-bar {
+            transition: width 0.3s ease;
         }
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen p-4">
@@ -35,12 +37,29 @@
                     <input type="text" id="queryInput" 
                            class="flex-grow px-4 py-2 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500" 
                            placeholder="Ask anything..." required>
-                    <button type="submit" 
+                    <button type="submit" id="searchButton"
                             class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-r-lg">
                         Search
                     </button>
                 </div>
             </form>
+            
+            <!-- Progress Section -->
+            <div id="progressSection" class="hidden mb-6">
+                <div class="mb-2">
+                    <div class="flex justify-between text-sm text-gray-600">
+                        <span id="progressText">Processing...</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2.5">
+                    <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full progress-bar" style="width: 0%"></div>
+                </div>
+                <div id="stageIndicator" class="mt-2 text-sm text-gray-500 flex items-center">
+                    <div class="loader rounded-full h-4 w-4 border-2 border-t-2 border-gray-200 mr-2"></div>
+                    <span id="currentStage">Starting...</span>
+                </div>
+            </div>
             
             <div id="result" class="hidden">
                 <div class="flex items-center justify-between mb-4">
@@ -56,64 +75,77 @@
                     </div>
                 </div>
                 
-                <div id="summary" class="bg-gray-50 p-4 rounded border border-gray-200 mb-4"></div>
+                <div id="summary" class="bg-gray-50 p-4 rounded border border-gray-200 mb-4 whitespace-pre-line"></div>
                 
-                <!-- Processing Log Section -->
-                <div id="logSection" class="hidden">
-                    <h3 class="text-lg font-semibold mb-2 flex items-center">
-                        🔍 Processing Log
-                        <button id="toggleLog" class="ml-2 text-sm bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded">
-                            Show
-                        </button>
-                    </h3>
-                    <div id="processingLog" class="processing-log hidden"></div>
-                </div>
-            </div>
-            
-            <div id="loading" class="hidden text-center my-8">
-                <div class="loader rounded-full h-12 w-12 border-4 border-t-4 border-gray-200 mx-auto mb-4"></div>
-                <p>Searching and summarizing...</p>
-                <p class="text-sm text-gray-600 mt-2">Now processing 5 pages (same as CLI version)</p>
+
             </div>
             
             <div id="error" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mt-4"></div>
-        </div>
-
-        <!-- Quality Notice -->
-        <div class="bg-blue-50 border-l-4 border-blue-500 text-blue-700 p-4 mt-4 rounded">
-            <div class="flex">
-                <div class="flex-shrink-0">
-                    <span class="text-blue-500">ℹ️</span>
-                </div>
-                <div class="ml-3">
-                    <p class="text-sm">
-                        <strong>Quality Update:</strong> Web version now processes exactly like CLI version - 
-                        scraping 5 pages instead of 3 for better, more comprehensive results.
-                    </p>
-                </div>
-            </div>
         </div>
     </div>
 
     <script>
         const form = document.getElementById('searchForm');
+        const searchButton = document.getElementById('searchButton');
         const resultDiv = document.getElementById('result');
-        const loadingDiv = document.getElementById('loading');
+        const progressSection = document.getElementById('progressSection');
         const errorDiv = document.getElementById('error');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const progressPercent = document.getElementById('progressPercent');
+        const currentStage = document.getElementById('currentStage');
         
-        // Toggle processing log visibility
-        document.getElementById('toggleLog').addEventListener('click', () => {
-            const log = document.getElementById('processingLog');
-            const button = document.getElementById('toggleLog');
+        let eventSource = null;
+        
+        function resetUI() {
+            resultDiv.classList.add('hidden');
+            errorDiv.classList.add('hidden');
+            progressSection.classList.add('hidden');
+            progressBar.style.width = '0%';
+            progressPercent.textContent = '0%';
+        }
+        
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+            progressSection.classList.add('hidden');
+            searchButton.disabled = false;
+            searchButton.textContent = 'Search';
+        }
+        
+        function updateProgress(progress, message, stage) {
+            progressBar.style.width = progress + '%';
+            progressPercent.textContent = progress + '%';
+            progressText.textContent = message;
+            currentStage.textContent = stage || message;
+        }
+        
+        function showResult(data) {
+            document.getElementById('summary').textContent = data.summary;
             
-            if (log.classList.contains('hidden')) {
-                log.classList.remove('hidden');
-                button.textContent = 'Hide';
+            const cacheTag = document.getElementById('cacheTag');
+            if (data.is_cached) {
+                cacheTag.textContent = `Cached (${Math.round((data.similarity || 0) * 100)}% match)`;
+                cacheTag.classList.remove('hidden');
             } else {
-                log.classList.add('hidden');
-                button.textContent = 'Show';
+                cacheTag.classList.add('hidden');
             }
-        });
+            
+            const statsDiv = document.getElementById('processingStats');
+            const pagesSpan = document.getElementById('pagesScraped');
+            const contentSpan = document.getElementById('contentLength');
+            
+            if (data.pages_scraped !== undefined) {
+                pagesSpan.textContent = `📄 ${data.pages_scraped} pages scraped`;
+                contentSpan.textContent = `📝 ${data.total_content_length?.toLocaleString()} chars processed`;
+                statsDiv.classList.remove('hidden');
+            }
+            
+            resultDiv.classList.remove('hidden');
+            progressSection.classList.add('hidden');
+            searchButton.disabled = false;
+            searchButton.textContent = 'Search';
+        }
         
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -121,64 +153,62 @@
             const query = document.getElementById('queryInput').value.trim();
             if (!query) return;
             
-            // Reset UI
-            resultDiv.classList.add('hidden');
-            errorDiv.classList.add('hidden');
-            loadingDiv.classList.remove('hidden');
+            // Reset UI and show progress
+            resetUI();
+            progressSection.classList.remove('hidden');
+            searchButton.disabled = true;
+            searchButton.textContent = 'Processing...';
             
-            try {
-                const response = await fetch('/search', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: `query=${encodeURIComponent(query)}`
-                });
-                
-                const data = await response.ok ? await response.json() : null;
-                
-                if (data && !data.error) {
-                    // Display summary
-                    document.getElementById('summary').textContent = data.summary;
+            // Close existing EventSource if any
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            // Start Server-Sent Events with query parameter
+            eventSource = new EventSource(`/search_progress?query=${encodeURIComponent(query)}`);
+            
+            eventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
                     
-                    // Handle cache tag
-                    const cacheTag = document.getElementById('cacheTag');
-                    if (data.is_cached) {
-                        cacheTag.textContent = `Cached (${Math.round(data.similarity * 100)}% match)`;
-                        cacheTag.classList.remove('hidden');
+                    if (data.stage === 'error') {
+                        showError(data.message);
+                        eventSource.close();
+                    } else if (data.stage === 'complete') {
+                        updateProgress(100, 'Complete!', 'Finished');
+                        setTimeout(() => showResult(data), 500);
+                        eventSource.close();
                     } else {
-                        cacheTag.classList.add('hidden');
-                    }
-                    
-                    // Display processing stats
-                    const statsDiv = document.getElementById('processingStats');
-                    const pagesSpan = document.getElementById('pagesScraped');
-                    const contentSpan = document.getElementById('contentLength');
-                    
-                    if (data.pages_scraped !== undefined) {
-                        pagesSpan.textContent = `📄 ${data.pages_scraped} pages scraped`;
-                        contentSpan.textContent = `📝 ${data.total_content_length?.toLocaleString()} chars processed`;
-                        statsDiv.classList.remove('hidden');
-                    }
-                    
-                    // Display processing log
-                    if (data.processing_log && data.processing_log.length > 0) {
-                        const logDiv = document.getElementById('processingLog');
-                        const logSection = document.getElementById('logSection');
+                        // Update progress for various stages
+                        const stageMessages = {
+                            'validating': '🔍 Validating query...',
+                            'cache': '💾 Checking cache...',
+                            'searching': '🌐 Searching DuckDuckGo...',
+                            'found': '✅ Search complete',
+                            'scraping': '� ' + data.message,
+                            'summarizing': '✂️ Creating summary...',
+                            'caching': '💾 Saving result...'
+                        };
                         
-                        logDiv.innerHTML = data.processing_log.map(line => `<div>${line}</div>`).join('');
-                        logSection.classList.remove('hidden');
+                        const stageText = stageMessages[data.stage] || data.message;
+                        updateProgress(data.progress, data.message, stageText);
                     }
-                    
-                    resultDiv.classList.remove('hidden');
-                } else {
-                    throw new Error(data?.error || 'Failed to process query');
+                } catch (error) {
+                    console.error('Error parsing SSE data:', error);
                 }
-            } catch (err) {
-                errorDiv.textContent = err.message;
-                errorDiv.classList.remove('hidden');
-            } finally {
-                loadingDiv.classList.add('hidden');
+            };
+            
+            eventSource.onerror = function(event) {
+                console.error('SSE error:', event);
+                showError('Connection error. Please try again.');
+                eventSource.close();
+            };
+        });
+        
+        // Clean up EventSource when page is closed
+        window.addEventListener('beforeunload', function() {
+            if (eventSource) {
+                eventSource.close();
             }
         });
     </script>

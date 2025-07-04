@@ -4,49 +4,73 @@ from cache import find_similar_query, add_to_cache
 from web_search import search_duckduckgo, scrape_page
 from summarizer import summarize_text
 import time
+import os
+
+# Set environment variable for tokenizers
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 app = Flask(__name__)
 
 def web_process_query(query):
-    """Adapted version of your CLI logic for web"""
-    # 1. Validate query
-    if classify_query(query) == "invalid":
-        raise ValueError("Invalid query - please try a different search")
+    """
+    Exact replica of main.py logic for consistent quality results
+    """
+    results_log = []  # For tracking progress
     
-    # 2. Check cache
+    # Step 1: Validate query (same as main.py)
+    if classify_query(query) == "invalid":
+        raise ValueError("❌ Invalid query")
+    
+    # Step 2: Check cache (same as main.py)
     cached, similarity = find_similar_query(query)
     if cached:
+        results_log.append(f"✅ Using cached result (similarity: {similarity:.2f})")
         return {
             "summary": cached,
             "is_cached": True,
-            "similarity": float(similarity)
+            "similarity": float(similarity),
+            "log": results_log
         }
     
-    # 3. Search web (limit to 3 pages for faster response)
+    # Step 3: Search the web (same as main.py)
+    results_log.append("🌐 Searching web...")
     urls = search_duckduckgo(query)
     if not urls:
-        raise ValueError("No results found - try a different query")
+        raise ValueError("⚠️ No search results found")
     
-    # 4. Scrape pages
+    # Step 4: Scrape top 5 pages (EXACTLY like main.py)
+    results_log.append(f"📄 Found {len(urls)} search results")
     contents = []
-    for url in urls[:3]:
+    
+    for i, url in enumerate(urls[:5], 1):  # Changed from 3 to 5 pages like main.py
+        results_log.append(f"🔗 [{i}/5] Scraping: {url}")
         content = scrape_page(url)
         if content:
-            contents.append(content[:5000])
-        time.sleep(1)
+            contents.append(content[:5000])  # Limit size (same as main.py)
+        time.sleep(1)  # Same delay as main.py
     
     if not contents:
-        raise ValueError("Couldn't extract content - please try again")
+        raise ValueError("⚠️ No content could be scraped")
     
-    # 5. Summarize
-    summary = summarize_text("\n\n".join(contents))
+    # Step 5: Summarize (same as main.py)
+    combined = "\n\n".join(contents)
+    results_log.append("✂️ Summarizing scraped content...")
     
-    # 6. Cache result
+    try:
+        summary = summarize_text(combined)
+    except Exception as e:
+        raise ValueError(f"❌ Summarization failed: {e}")
+    
+    # Step 6: Cache and return result (same as main.py)
     add_to_cache(query, summary)
+    results_log.append("✅ Summary generated and cached")
     
     return {
         "summary": summary,
-        "is_cached": False
+        "is_cached": False,
+        "pages_scraped": len(contents),
+        "total_content_length": len(combined),
+        "log": results_log
     }
 
 @app.route('/')
@@ -64,7 +88,10 @@ def search():
         return jsonify({
             'summary': result['summary'],
             'is_cached': result.get('is_cached', False),
-            'similarity': result.get('similarity', 0)
+            'similarity': result.get('similarity', 0),
+            'pages_scraped': result.get('pages_scraped', 0),
+            'total_content_length': result.get('total_content_length', 0),
+            'processing_log': result.get('log', [])
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 400

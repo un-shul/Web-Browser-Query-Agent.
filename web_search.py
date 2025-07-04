@@ -1,67 +1,187 @@
-from duckduckgo_search import DDGS
 import requests
 from bs4 import BeautifulSoup
 import time
 import random
-from typing import List, Optional
+import urllib.parse
+from typing import List, Dict, Optional
 
-# 🔒 GLOBAL REUSABLE CLIENT
-ddgs_client = DDGS()
+# Rotating User Agents to avoid detection
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/120.0.0.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+]
 
-# Rate limiting variables
-_last_search_time = 0
-_min_search_interval = 2.0  # Minimum seconds between searches
+def get_random_headers():
+    """Get randomized headers to avoid detection"""
+    return {
+        "User-Agent": random.choice(USER_AGENTS),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "gzip, deflate",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+    }
 
-def search_duckduckgo(query: str, max_results: int = 5, max_retries: int = 3) -> List[str]:
+def search_google_scrape(query: str, max_results: int = 5) -> List[str]:
     """
-    Search DuckDuckGo and return URLs with proper rate limiting and retry logic
+    Scrape Google search results directly (backup method)
     """
-    global _last_search_time, ddgs_client
-    
-    # Implement rate limiting - wait if needed
-    current_time = time.time()
-    time_since_last = current_time - _last_search_time
-    if time_since_last < _min_search_interval:
-        sleep_time = _min_search_interval - time_since_last
-        print(f"⏳ Rate limiting: waiting {sleep_time:.1f}s...")
-        time.sleep(sleep_time)
-    
-    for attempt in range(max_retries):
-        try:
-            _last_search_time = time.time()
-            results = ddgs_client.text(query, max_results=max_results)
-            return [result['href'] for result in results]
+    try:
+        headers = get_random_headers()
+        params = {
+            'q': query,
+            'num': max_results,
+            'hl': 'en'
+        }
+        
+        url = "https://www.google.com/search"
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-        except Exception as e:
-            error_str = str(e).lower()
-            
-            # Check if it's a rate limit error
-            if 'ratelimit' in error_str or '202' in error_str:
-                if attempt < max_retries - 1:
-                    # Exponential backoff with jitter
-                    wait_time = (2 ** attempt) + random.uniform(1, 3)
-                    print(f"⚠️ Rate limited. Waiting {wait_time:.1f}s before retry {attempt + 1}/{max_retries}...")
-                    time.sleep(wait_time)
+            # Find search result links
+            links = []
+            for g in soup.find_all('div', class_='g'):
+                link = g.find('a')
+                if link and link.get('href'):
+                    href = link['href']
+                    if href.startswith('/url?q='):
+                        # Extract actual URL from Google redirect
+                        actual_url = urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get('q')
+                        if actual_url:
+                            links.append(actual_url[0])
+                    elif href.startswith('http'):
+                        links.append(href)
+                        
+                if len(links) >= max_results:
+                    break
                     
-                    # Recreate client to reset any connection state
-                    ddgs_client = DDGS()
-                    continue
-                else:
-                    print(f"⚠️ Max retries reached. Rate limit error: {str(e)}")
-                    return []
-            else:
-                print(f"⚠️ Search error: {str(e)}")
-                return []
+            print(f"✅ Google scrape found {len(links)} results")
+            return links
+        else:
+            print(f"⚠️ Google search failed with status {response.status_code}")
+            return []
+            
+    except Exception as e:
+        print(f"⚠️ Google scrape error: {str(e)}")
+        return []
+
+def search_bing_scrape(query: str, max_results: int = 5) -> List[str]:
+    """
+    Scrape Bing search results directly
+    """
+    try:
+        headers = get_random_headers()
+        params = {
+            'q': query,
+            'count': max_results
+        }
+        
+        url = "https://www.bing.com/search"
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            links = []
+            for result in soup.find_all('h2'):
+                link = result.find('a')
+                if link and link.get('href'):
+                    href = link['href']
+                    if href.startswith('http'):
+                        links.append(href)
+                        
+                if len(links) >= max_results:
+                    break
+                    
+            print(f"✅ Bing scrape found {len(links)} results")
+            return links
+        else:
+            print(f"⚠️ Bing search failed with status {response.status_code}")
+            return []
+            
+    except Exception as e:
+        print(f"⚠️ Bing scrape error: {str(e)}")
+        return []
+
+def search_duckduckgo_lite(query: str, max_results: int = 5) -> List[str]:
+    """
+    Use DuckDuckGo HTML interface (more reliable than API)
+    """
+    try:
+        headers = get_random_headers()
+        params = {
+            'q': query,
+            'kl': 'us-en'
+        }
+        
+        url = "https://html.duckduckgo.com/html/"
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            links = []
+            for result in soup.find_all('a', class_='result__url'):
+                href = result.get('href')
+                if href and href.startswith('http'):
+                    links.append(href)
+                    
+                if len(links) >= max_results:
+                    break
+                    
+            print(f"✅ DuckDuckGo HTML found {len(links)} results")
+            return links
+        else:
+            print(f"⚠️ DuckDuckGo HTML failed with status {response.status_code}")
+            return []
+            
+    except Exception as e:
+        print(f"⚠️ DuckDuckGo HTML error: {str(e)}")
+        return []
+
+def search_multi_engine(query: str, max_results: int = 5) -> List[str]:
+    """
+    Try multiple search engines in sequence until one works
+    """
+    print(f"🔍 Searching for: {query}")
     
+    # List of search methods to try in order
+    search_methods = [
+        ("DuckDuckGo HTML", search_duckduckgo_lite),
+        ("Bing Scrape", search_bing_scrape),
+        ("Google Scrape", search_google_scrape),
+    ]
+    
+    for method_name, search_func in search_methods:
+        try:
+            print(f"🔄 Trying {method_name}...")
+            results = search_func(query, max_results)
+            
+            if results:
+                print(f"✅ {method_name} successful! Found {len(results)} results")
+                return results
+            else:
+                print(f"❌ {method_name} returned no results")
+                
+        except Exception as e:
+            print(f"❌ {method_name} failed: {str(e)}")
+            
+        # Wait between attempts
+        time.sleep(random.uniform(1, 3))
+    
+    print("❌ All search methods failed")
     return []
 
 def scrape_page(url: str, timeout: int = 10) -> str:
     """
     Scrape content from a webpage with improved error handling
     """
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    headers = get_random_headers()
 
     try:
         response = requests.get(url, headers=headers, timeout=timeout)
@@ -70,11 +190,17 @@ def scrape_page(url: str, timeout: int = 10) -> str:
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # Remove unwanted elements
-        for element in soup(['script', 'style', 'nav', 'footer', 'iframe', 'noscript']):
+        for element in soup(['script', 'style', 'nav', 'footer', 'iframe', 'noscript', 'header']):
             element.decompose()
 
-        # Extract main content
-        main_content = soup.find('article') or soup.find('main') or soup.find('body')
+        # Extract main content - try multiple selectors
+        main_content = (
+            soup.find('article') or 
+            soup.find('main') or 
+            soup.find('div', class_=lambda x: x and any(keyword in x.lower() for keyword in ['content', 'article', 'post', 'body'])) or
+            soup.find('body')
+        )
+        
         if main_content:
             text = main_content.get_text(separator='\n', strip=True)
             return ' '.join(text.split())
@@ -91,15 +217,14 @@ def scrape_page(url: str, timeout: int = 10) -> str:
         print(f"⚠️ Failed to scrape {url}: {str(e)}")
         return ""
 
-def search_and_scrape(query: str, max_results: int = 3, max_retries: int = 3) -> List[dict]:
+def search_and_scrape(query: str, max_results: int = 3) -> List[Dict[str, str]]:
     """
     Combined function to search and scrape content from top results
     """
-    print(f"🔍 Searching for: {query}")
-    urls = search_duckduckgo(query, max_results, max_retries)
+    urls = search_multi_engine(query, max_results)
     
     if not urls:
-        print("❌ No search results found")
+        print("❌ No search results found from any search engine")
         return []
     
     results = []
@@ -112,8 +237,14 @@ def search_and_scrape(query: str, max_results: int = 3, max_retries: int = 3) ->
                 'content': content[:2000] + '...' if len(content) > 2000 else content
             })
         
-        # Add small delay between scraping requests
+        # Add delay between scraping requests
         if i < len(urls) - 1:
-            time.sleep(1)
+            time.sleep(random.uniform(2, 4))
     
+    print(f"✅ Successfully scraped {len(results)} pages")
     return results
+
+# Legacy function names for compatibility
+def search_duckduckgo(query: str, max_results: int = 5, max_retries: int = 3) -> List[str]:
+    """Legacy function - now uses multi-engine search"""
+    return search_multi_engine(query, max_results)

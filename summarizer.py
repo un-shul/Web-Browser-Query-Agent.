@@ -26,167 +26,102 @@ def suppress_warnings():
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
-def aggressive_text_cleaning(text):
-    """
-    Aggressively clean text to remove promotional and irrelevant content
-    """
-    # Remove package pricing and booking content
-    text = re.sub(r'\b\d+[,.]?\d*\s*(Rs|INR|₹|onwards|person|off|discount)\b.*?(?=\.|$)', '', text, flags=re.I)
-    text = re.sub(r'\b(Get Offers|Book Now|View Packages|Compare quotes|Customized|Package|Tour|Days|Nights)\b.*?(?=\.|$)', '', text, flags=re.I)
+def clean_text(text):
+    # Remove login/registration prompts and website clutter
+    text = re.sub(r"\b(You are already registered|Please login|Dont have an account|Sign up|Facebook user|Facebook account)\b.*?(?=\.|$)", "", text, flags=re.I)
+    text = re.sub(r"\b(Mr Mrs Ms Dr Master Miss|Contains between|alphanumeric characters|special character|not mandatory)\b.*?(?=\.|$)", "", text, flags=re.I)
+    
+    # Remove social media and promotional content
+    text = re.sub(r"\b(Follow us|Like us|Subscribe|Share|Tweet|Facebook|Instagram|Twitter)\b.*?(?=\.|$)", "", text, flags=re.I)
+    
+    # Remove booking and commercial content
+    text = re.sub(r"\b(Book now|Call now|Contact us|Get quotes|Price|Package|Offer|Discount)\b.*?(?=\.|$)", "", text, flags=re.I)
     
     # Remove navigation and website elements
-    text = re.sub(r'\b(Skip to|Main Content|Screen Reader|Welcome to|Discover|Destinations)\b.*?(?=\.|$)', '', text, flags=re.I)
+    text = re.sub(r"\b(Menu|Navigation|Home|About|Contact|Privacy Policy|Terms|Cookies)\b.*?(?=\.|$)", "", text, flags=re.I)
     
-    # Remove lists of places without context
-    text = re.sub(r'\b(Ajmer|Alwar|Banswara|Baran|Barmer|Bharatpur|Bhilwara|Bikaner|Bundi|Chittorgarh|Dausa|Dholpur|Dungarpur|Hanumangarh|Jalore|Jhalawar|Karauli|Kota|Nagaur|Pali|Pratapgarh|Sawaimadhopur|Shekhawati|Sriganganagar|Tonk|Rajsamand)\b(?:\s+\b(?:Ajmer|Alwar|Banswara|Baran|Barmer|Bharatpur|Bhilwara|Bikaner|Bundi|Chittorgarh|Dausa|Dholpur|Dungarpur|Hanumangarh|Jalore|Jhalawar|Karauli|Kota|Nagaur|Pali|Pratapgarh|Sawaimadhopur|Shekhawati|Sriganganagar|Tonk|Rajsamand)\b){3,}', '', text, flags=re.I)
+    # Original cleaning
+    text = re.sub(r"\n+", "\n", text)
+    text = re.sub(r"[^\w\s,.!?]", "", text)
+    text = re.sub(r"\b(where is|list of|all [a-z]+ countries|city of [a-z]+)\b.*", "", text, flags=re.I)
     
-    # Remove promotional phrases
-    text = re.sub(r'\b(Call now|WhatsApp|Subscribe|Follow us|Book early|Perfect for|Highlights|Tips)\b.*?(?=\.|$)', '', text, flags=re.I)
-    
-    # Remove contact info and social media
-    text = re.sub(r'\b\d{10,}\b', '', text)  # Phone numbers
-    text = re.sub(r'\S+@\S+\.\S+', '', text)  # Emails
-    
-    # Clean up extra spaces and punctuation
-    text = re.sub(r'\s+', ' ', text)
-    text = re.sub(r'[^\w\s.!?,-]', '', text)
+    # Remove extra spaces
+    text = re.sub(r"\s+", " ", text)
     
     return text.strip()
 
-def extract_meaningful_sentences(text, query_words=None):
+def fix_punctuation(text):
     """
-    Extract only meaningful, complete sentences related to the query
+    Fix punctuation issues like extra spaces before periods, commas, etc.
     """
-    # Split into sentences
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    # Remove spaces before punctuation
+    text = re.sub(r'\s+([.!?,:;])', r'\1', text)
     
-    good_sentences = []
-    query_terms = set(query_words.lower().split()) if query_words else set()
+    # Ensure single space after punctuation
+    text = re.sub(r'([.!?])\s*', r'\1 ', text)
+    text = re.sub(r'([,:;])\s*', r'\1 ', text)
     
-    for sentence in sentences:
-        sentence = sentence.strip()
-        
-        # Skip short sentences
-        if len(sentence) < 30 or len(sentence.split()) < 5:
-            continue
-            
-        # Skip sentences with too many numbers (likely pricing/data)
-        numbers = len(re.findall(r'\b\d+\b', sentence))
-        if numbers > 3:
-            continue
-            
-        # Skip sentences that are mostly promotional
-        promo_words = ['book', 'package', 'offer', 'discount', 'call', 'contact', 'get']
-        promo_count = sum(1 for word in promo_words if word in sentence.lower())
-        if promo_count > 2:
-            continue
-            
-        # Prefer sentences that contain query terms
-        sentence_words = set(sentence.lower().split())
-        relevance_score = len(query_terms.intersection(sentence_words))
-        
-        # Keep sentences with good relevance or general travel info
-        if relevance_score > 0 or any(word in sentence.lower() for word in ['weather', 'temperature', 'season', 'month', 'time', 'best']):
-            good_sentences.append((sentence, relevance_score))
+    # Fix multiple spaces
+    text = re.sub(r'\s+', ' ', text)
     
-    # Sort by relevance and return top sentences
-    good_sentences.sort(key=lambda x: x[1], reverse=True)
-    return [sentence for sentence, score in good_sentences[:8]]
+    # Remove trailing spaces and fix paragraph spacing
+    text = text.strip()
+    text = re.sub(r'\n\n+', '\n\n', text)
+    
+    return text
 
-def create_readable_summary(sentences):
+def split_text(text, max_words=400):
+    words = text.split()
+    for i in range(0, len(words), max_words):
+        yield " ".join(words[i:i + max_words])
+
+def trim_to_sentence_boundary(text, max_chars=4500):
     """
-    Create a well-formatted summary with proper paragraphs
+    Increased max_chars from 3000 to 4500 for longer summaries
     """
-    if not sentences:
-        return "No relevant information found."
+    # First fix punctuation
+    text = fix_punctuation(text)
     
-    # Group sentences by topic
-    weather_sentences = []
-    time_sentences = []
-    general_sentences = []
-    
+    if len(text) <= max_chars:
+        return text
+
+    sentences = re.split(r'(?<=[.!?]) +', text)
+    trimmed = ''
     for sentence in sentences:
-        lower = sentence.lower()
-        if any(word in lower for word in ['weather', 'temperature', 'climate', 'hot', 'cold', 'rain']):
-            weather_sentences.append(sentence)
-        elif any(word in lower for word in ['best time', 'ideal', 'perfect', 'recommended', 'visit']):
-            time_sentences.append(sentence)
+        if len(trimmed) + len(sentence) <= max_chars:
+            trimmed += sentence + ' '
         else:
-            general_sentences.append(sentence)
+            break
     
-    # Build summary with paragraphs
-    summary_parts = []
-    
-    # Best time paragraph
-    if time_sentences:
-        summary_parts.append(' '.join(time_sentences[:2]))
-    
-    # Weather paragraph  
-    if weather_sentences:
-        summary_parts.append(' '.join(weather_sentences[:2]))
-    
-    # Additional info paragraph
-    if general_sentences:
-        summary_parts.append(' '.join(general_sentences[:2]))
-    
-    # Join with double newlines for paragraphs
-    final_summary = '\n\n'.join(summary_parts)
-    
-    # Clean up any remaining issues
-    final_summary = re.sub(r'\s+', ' ', final_summary)
-    final_summary = re.sub(r'\n\n+', '\n\n', final_summary)
-    
-    return final_summary.strip()
+    # Final punctuation fix
+    return fix_punctuation(trimmed.strip())
 
-def fallback_ai_summary(text, query=None):
+def summarize_text(text, query=None, max_chunk_words=380):
     """
-    Simple AI summarization fallback
+    Main summarization function - your original approach with improvements
     """
-    try:
-        # Clean text first
-        cleaned = aggressive_text_cleaning(text)
-        
-        # Limit text size
-        words = cleaned.split()
-        if len(words) > 400:
-            cleaned = ' '.join(words[:400])
-        
-        with suppress_warnings():
-            result = summarizer(cleaned, max_length=100, min_length=30, do_sample=False)
-            return result[0]['summary_text']
-    except Exception as e:
-        print(f"⚠️ AI summarization failed: {e}")
+    text = clean_text(text)
+    chunks = list(split_text(text, max_chunk_words))
+
+    summaries = []
+    for chunk in chunks:
+        try:
+            # Use the context manager to suppress warnings
+            with suppress_warnings():
+                # Increased max_length from 120 to 160 for longer summaries (3-4 more lines)
+                summary = summarizer(chunk, max_length=160, min_length=50, do_sample=False)
+            summaries.append(summary[0]['summary_text'])
+        except Exception as e:
+            print(f"⚠️ Skipping chunk due to error: {e}")
+            continue
+
+    if not summaries:
         return "Unable to generate summary."
-
-def summarize_text(text, query=None):
-    """
-    Main summarization function - simple and effective
-    """
-    if not text or len(text.strip()) < 100:
-        return "Insufficient content to summarize."
     
-    # Step 1: Aggressive cleaning
-    cleaned_text = aggressive_text_cleaning(text)
+    # Join summaries with proper spacing
+    final_summary = "\n\n".join(summaries)
     
-    if len(cleaned_text) < 200:
-        return fallback_ai_summary(text, query)
+    # Apply punctuation fixes to the final result
+    final_summary = fix_punctuation(final_summary)
     
-    # Step 2: Extract meaningful sentences
-    sentences = extract_meaningful_sentences(cleaned_text, query)
-    
-    if len(sentences) < 2:
-        return fallback_ai_summary(cleaned_text, query)
-    
-    # Step 3: Create readable summary
-    summary = create_readable_summary(sentences)
-    
-    # Step 4: Final validation
-    if len(summary.split()) < 20:
-        return fallback_ai_summary(cleaned_text, query)
-    
-    # Ensure summary isn't too long
-    if len(summary) > 1000:
-        paragraphs = summary.split('\n\n')
-        summary = '\n\n'.join(paragraphs[:2])
-    
-    return summary if summary else "Unable to generate a meaningful summary."
+    return trim_to_sentence_boundary(final_summary)

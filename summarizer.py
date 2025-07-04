@@ -2,20 +2,29 @@ import contextlib
 import os
 import sys
 import re
+import warnings
+import logging
 from transformers import pipeline
+
+# Suppress transformers warnings and logging
+logging.getLogger("transformers").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
 
 summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
-# Silence Hugging Face warnings like: "Your max_length is set to..."
+# Silence ALL output (both stdout and stderr) including Hugging Face warnings
 @contextlib.contextmanager
-def suppress_stdout():
+def suppress_warnings():
     with open(os.devnull, "w") as devnull:
         old_stdout = sys.stdout
+        old_stderr = sys.stderr
         sys.stdout = devnull
+        sys.stderr = devnull
         try:
             yield
         finally:
             sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
 
 def clean_text(text):
@@ -49,7 +58,9 @@ def summarize_text(text, max_chunk_words=380):
     summaries = []
     for chunk in chunks:
         try:
-            summary = summarizer(chunk, max_length=120, min_length=40, do_sample=False)
+            # Use the context manager to suppress warnings
+            with suppress_warnings():
+                summary = summarizer(chunk, max_length=120, min_length=40, do_sample=False)
             summaries.append(summary[0]['summary_text'])
         except Exception as e:
             print(f"⚠️ Skipping chunk due to error: {e}")

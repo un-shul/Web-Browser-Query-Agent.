@@ -49,7 +49,7 @@ def main():
         combined = "\n\n".join(contents)
         print("\n✂️ Summarizing scraped content...")
         try:
-            summary = summarize_text(combined)
+            summary = summarize_text(combined, query)
         except Exception as e:
             print(f"❌ Summarization failed: {e}")
             continue

@@ -239,16 +239,15 @@ def search_duckduckgo_lite(query: str, max_results: int = 10) -> List[str]:
 
 def search_multi_engine(query: str, max_results: int = 5) -> List[str]:
     """
-    Try multiple search engines with enhanced queries
+    Try multiple search engines with enhanced queries (DuckDuckGo + Google only)
     """
     enhanced_query = enhance_query(query)
     print(f"🔍 Searching for: {enhanced_query}")
     
-    # List of search methods to try in order
+    # List of search methods to try in order (skipping Bing for better quality)
     search_methods = [
-        ("Google Scrape", search_google_scrape),
-        ("Bing Scrape", search_bing_scrape),
         ("DuckDuckGo HTML", search_duckduckgo_lite),
+        ("Google Scrape", search_google_scrape),
     ]
     
     for method_name, search_func in search_methods:

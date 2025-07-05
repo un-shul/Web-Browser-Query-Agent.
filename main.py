@@ -1,7 +1,7 @@
 import os
 import time
 from web_search import search_duckduckgo, scrape_page
-from cache import find_similar_query, add_to_cache
+from cache_chromadb import find_similar_query, add_to_cache, get_cache_stats
 from agent import classify_query
 from summarizer import summarize_text
 

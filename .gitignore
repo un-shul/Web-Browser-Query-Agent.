@@ -1,6 +1,7 @@
 venv/
 __pycache__/
 embedding_model/
+chroma_db/
 *.pyc
 *.pkl
 *.log

@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify, Response
 from agent import classify_query
-from cache import find_similar_query, add_to_cache
+from cache_chromadb import find_similar_query, add_to_cache, get_cache_stats
 from web_search import search_duckduckgo, scrape_page
 from summarizer import summarize_text
 import time
@@ -49,7 +49,7 @@ def web_process_query_with_progress(query):
             
             for i, url in enumerate(urls[:5], 1):
                 progress = 25 + (i * 10)  # 25% to 75%
-                yield f"data: {json.dumps({'stage': 'scraping', 'message': f'Scraping page {i}/{total_pages} ({progress-15}%)', 'progress': progress})}\n\n"
+                yield f"data: {json.dumps({'stage': 'scraping', 'message': f'Scraping page {i}/{total_pages}', 'progress': progress})}\n\n"
                 
                 content = scrape_page(url)
                 if content:
@@ -146,6 +146,77 @@ def search():
         
     except Exception as e:
         return jsonify({'error': f'Processing failed: {str(e)}'}), 500
+    
+@app.route('/cache-stats')
+def cache_stats():
+    """Get cache statistics"""
+    stats = get_cache_stats()
+    return jsonify(stats)
+
+@app.route('/cache-view')
+def cache_view():
+    """View all cached queries"""
+    from cache_chromadb import view_all_cache
+    cache_items = view_all_cache()
+    return jsonify({
+        'total_items': len(cache_items),
+        'items': cache_items
+    })
+
+@app.route('/cache-search')
+def cache_search():
+    """Search cached queries"""
+    from cache_chromadb import search_cache
+    search_term = request.args.get('q', '')
+    if not search_term:
+        return jsonify({'error': 'Please provide search term with ?q=your_term'})
+    
+    results = search_cache(search_term)
+    return jsonify({
+        'search_term': search_term,
+        'found_items': len(results),
+        'items': results
+    })
+
+@app.route('/cache-delete-item', methods=['POST'])
+def cache_delete_item():
+    """Delete a specific cache item"""
+    from cache_chromadb import delete_cache_item
+    data = request.get_json()
+    
+    if not data or 'id' not in data:
+        return jsonify({'error': 'Please provide item ID'}), 400
+    
+    success = delete_cache_item(data['id'])
+    if success:
+        return jsonify({'message': 'Item deleted successfully'})
+    else:
+        return jsonify({'error': 'Failed to delete item'}), 500
+
+@app.route('/cache-delete-query', methods=['POST'])
+def cache_delete_query():
+    """Delete cache items by query text"""
+    from cache_chromadb import delete_cache_by_query
+    data = request.get_json()
+    
+    if not data or 'query' not in data:
+        return jsonify({'error': 'Please provide query text'}), 400
+    
+    deleted_count = delete_cache_by_query(data['query'])
+    return jsonify({
+        'message': f'Deleted {deleted_count} items',
+        'deleted_count': deleted_count
+    })
+
+@app.route('/cache-clear', methods=['POST'])
+def cache_clear():
+    """Clear entire cache"""
+    from cache_chromadb import clear_cache
+    try:
+        clear_cache()
+        return jsonify({'message': 'Cache cleared successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)

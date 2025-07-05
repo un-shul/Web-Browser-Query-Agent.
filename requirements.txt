@@ -5,3 +5,4 @@ duckduckgo-search>=2.0.0
 transformers>=4.12.0
 sentence-transformers>=2.0.0
 scikit-learn>=1.0.0
+chromadb>=0.4.0

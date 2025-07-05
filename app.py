@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify, Response
 from agent import classify_query
-from cache import find_similar_query, add_to_cache
+from cache_chromadb import find_similar_query, add_to_cache, get_cache_stats
 from web_search import search_duckduckgo, scrape_page
 from summarizer import summarize_text
 import time
@@ -81,6 +81,12 @@ def web_process_query_with_progress(query):
 @app.route('/')
 def home():
     return render_template('index.html')
+
+@app.route('/cache-stats')
+def cache_stats():
+    """Get cache statistics"""
+    stats = get_cache_stats()
+    return jsonify(stats)
 
 @app.route('/search_progress', methods=['GET'])
 def search_progress():

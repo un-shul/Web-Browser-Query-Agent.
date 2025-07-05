@@ -49,7 +49,7 @@ def web_process_query_with_progress(query):
             
             for i, url in enumerate(urls[:5], 1):
                 progress = 25 + (i * 10)  # 25% to 75%
-                yield f"data: {json.dumps({'stage': 'scraping', 'message': f'Scraping page {i}/{total_pages} ({progress-15}%)', 'progress': progress})}\n\n"
+                yield f"data: {json.dumps({'stage': 'scraping', 'message': f'Scraping page {i}/{total_pages}', 'progress': progress})}\n\n"
                 
                 content = scrape_page(url)
                 if content:
